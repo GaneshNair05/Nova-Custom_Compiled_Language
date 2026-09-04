@@ -90,7 +90,7 @@ double nova_draw_text(double x, double y, double fontSize, double* strBuf) {
 double nova_draw_number(double x, double y, double fontSize, double value) {
     char buf[64];
     snprintf(buf, sizeof(buf), "%.0f", value);
-    DrawText(buf, (int)x, (int)y, (int)fontSize, BLACK);
+    DrawText(buf, (int)x, (int)y, (int)fontSize, WHITE);
     return 0.0;
 }
 
