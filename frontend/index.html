@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nova Playground</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-logo">✦</div>
+      <div class="brand-text">
+        <span class="brand-mark">Nova</span>
+        <span class="brand-tag">v1.0.0</span>
+      </div>
+    </div>
+
+    <div class="topbar-center">
+      <div class="custom-select-wrapper">
+        <select id="example-picker" aria-label="Load an example">
+          <option value="">Load an example…</option>
+        </select>
+        <span class="select-arrow">▾</span>
+      </div>
+    </div>
+
+    <div class="topbar-controls">
+      <button id="clear-btn" class="ghost-btn" title="Clear Editor">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path></svg>
+        Clear
+      </button>
+
+      <button id="run-btn" class="run-btn">
+        <span class="run-icon">▶</span>
+        <span class="btn-text">Run</span>
+        <kbd class="btn-kbd">Ctrl+↵</kbd>
+      </button>
+    </div>
+  </header>
+
+  <div id="demo-banner" class="demo-banner" hidden>
+    <span class="banner-badge">Demo Mode</span>
+    <span>No local compiler detected. Pick an example or configure <code>NOVA_COMPILER_PATH</code>.</span>
+  </div>
+
+  <main class="workspace">
+    <!-- Editor Pane -->
+    <section class="pane editor-pane">
+      <div class="pane-header">
+        <div class="pane-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+          main.nv
+        </div>
+        <span id="editor-status" class="editor-indicator">Ready</span>
+      </div>
+      <div id="editor"></div>
+    </section>
+
+    <!-- Output Pane -->
+    <section class="pane output-pane">
+      <div class="pane-header output-header">
+        <div class="terminal-dots">
+          <span class="dot red"></span>
+          <span class="dot yellow"></span>
+          <span class="dot green"></span>
+        </div>
+
+        <div class="output-tabs" role="tablist">
+          <button class="tab-btn active" data-tab="output" role="tab" aria-selected="true">Output</button>
+          <button class="tab-btn" data-tab="tokens" role="tab" aria-selected="false">Tokens</button>
+          <button class="tab-btn" data-tab="ir" role="tab" aria-selected="false">LLVM IR</button>
+        </div>
+
+        <div class="pane-actions">
+          <button id="copy-btn" class="icon-btn" title="Copy Output">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="output-body">
+        <pre id="tab-output" class="tab-panel active" data-panel="output"><span class="placeholder">// Click 'Run' or press Ctrl+Enter to compile and run your code.</span></pre>
+        <pre id="tab-tokens" class="tab-panel" data-panel="tokens"><span class="placeholder">// Lexer tokens will be displayed here.</span></pre>
+        <pre id="tab-ir" class="tab-panel" data-panel="ir"><span class="placeholder">// Generated LLVM IR will be displayed here.</span></pre>
+      </div>
+
+      <footer class="pane-footer">
+        <div class="footer-item"><span class="status-dot"></span> <span id="runtime-status">Idle</span></div>
+        <div id="exit-badge" class="footer-badge hidden">Exit Code: 0</div>
+      </footer>
+    </section>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.47.0/min/vs/loader.min.js"></script>
+  <script src="nova-language.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+# --- Version Control ---
+.git
+.gitignore
+
+# --- Node.js ---
+# Let Docker run `npm install` cleanly inside Linux
+node_modules
+npm-debug.log
+
+# --- Local Windows Binaries & Compiles ---
+build/
+bin/
+out/
+*.exe
+*.dll
+*.obj
+*.o
+
+# --- Documentation & Repo Meta ---
+README.md
+LICENSE
+.vscode/
+.idea/
+
+# --- Temporary / Test Scripts ---
+*.tmp
+*.temp
+test.nv
+*.log

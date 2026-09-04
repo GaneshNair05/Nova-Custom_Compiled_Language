@@ -1,0 +1,619 @@
+# =========================================================================
+#  NOVA SNAKE
+#  A polished Snake game written in the Nova language.
+#
+#  Controls:
+#    Menu screen   : 1 / 2 / 3 select speed (Slow/Medium/Fast), ENTER starts
+#    In game       : Arrow keys or W A S D to steer
+#    Game over     : SPACE to retry (same speed), ESC to exit
+#    Anywhere      : ESC quits immediately
+#
+#  Notes on design (Nova's rules, discovered from codegen.cpp):
+#    - Skills only ever take/return doubles, so all shared game state
+#      (snake body, food, score, etc.) lives in GLOBAL `loot`s that every
+#      skill reads/writes directly, instead of being passed as arguments.
+#    - There's no mouse API, so the "buttons" are drawn rectangles that
+#      you activate with the labeled key.
+#    - There's no number->string builtin, so the score is converted to
+#      text manually by peeling off digits and concatenating pre-made
+#      "0".."9" strings.
+#    - Strings/arrays are never garbage collected, so static UI text is
+#      allocated once as a global instead of being rebuilt every frame.
+# =========================================================================
+# ---------------------------------------------------------------------
+loot CELL = 25
+loot COLS = 30
+loot ROWS = 22
+loot BOARD_OFFSET_X = 25
+loot BOARD_OFFSET_Y = 80
+loot CAPACITY = 660
+
+# ---------------------------------------------------------------------
+# Snake / food / score state
+# ---------------------------------------------------------------------
+loot snakeX = array_new(CAPACITY)
+loot snakeY = array_new(CAPACITY)
+loot snakeLength = 3
+
+loot dirX = 1
+loot dirY = 0
+loot nextDirX = 1
+loot nextDirY = 0
+
+loot foodX = 0
+loot foodY = 0
+
+loot score = 0
+
+# ---------------------------------------------------------------------
+# 4x4 Block Obstacle State
+# ---------------------------------------------------------------------
+loot BLOCK_DIM = 4
+loot blockCount = 2
+loot blockAnchorX = array_new(4)
+loot blockAnchorY = array_new(4)
+
+# Global test query variables (Fixes the function call assignment bug)
+loot testQueryX = 0
+loot testQueryY = 0
+loot blockHitResult = 0
+
+# ---------------------------------------------------------------------
+# Game flow state:  0 = menu, 1 = playing, 2 = game over
+# ---------------------------------------------------------------------
+loot state = 0
+loot speedLevel = 2
+loot moveInterval = 6
+loot frameCounter = 0
+loot quitFlag = 0
+
+# ---------------------------------------------------------------------
+# Pre-allocated UI Text
+# ---------------------------------------------------------------------
+loot titleStr = "NOVA SNAKE"
+loot subtitleStr = "CONFIGURE SPEED & HAZARDS, THEN PRESS ENTER"
+
+loot speedHeaderStr = "SPEED: [1] CASUAL   [2] NORMAL   [3] OVERDRIVE"
+loot hazardHeaderStr = "HAZARDS: [Q] 0 BLOCKS   [W] 2 BLOCKS   [E] 4 BLOCKS"
+
+loot startLabelStr = "START MISSION [ENTER]"
+loot exitLabelStr = "ABORT [ESC]"
+loot gameOverStr = "SYSTEM FAILURE"
+loot retryLabelStr = "REBOOT [SPACE]"
+
+loot hudSpeedStr = "SPD: 2"
+loot hudHazardStr = "BLOCKS: 2"
+loot hudScoreStr = "SCORE: 0"
+loot finalScoreStr = "FINAL SCORE: 0"
+loot escPromptStr = "ESC: EXIT"
+
+# =========================================================================
+# SKILLS
+# =========================================================================
+
+# --- Converts `score` into formatted text ------------------------------
+skill updateScoreString()
+    loot s = score
+    loot result = "0"
+
+    when (s <= 0)
+        result = "0"
+    otherwise
+        result = ""
+        loot guard = 0
+        grind (s >= 1 and guard < 6)
+            loot d = s % 10
+            loot part = "0"
+
+            when (d >= 0.5 and d < 1.5)
+                part = "1"
+            finish
+            when (d >= 1.5 and d < 2.5)
+                part = "2"
+            finish
+            when (d >= 2.5 and d < 3.5)
+                part = "3"
+            finish
+            when (d >= 3.5 and d < 4.5)
+                part = "4"
+            finish
+            when (d >= 4.5 and d < 5.5)
+                part = "5"
+            finish
+            when (d >= 5.5 and d < 6.5)
+                part = "6"
+            finish
+            when (d >= 6.5 and d < 7.5)
+                part = "7"
+            finish
+            when (d >= 7.5 and d < 8.5)
+                part = "8"
+            finish
+            when (d >= 8.5 and d < 9.5)
+                part = "9"
+            finish
+
+            result = part + result
+            s = (s - d) / 10
+            guard = guard + 1
+        finish
+    finish
+
+    hudScoreStr = "SCORE: " + result
+    reward 0
+finish
+
+# --- Checks if testQueryX, testQueryY falls inside any 4x4 block -------
+skill checkBlockHit()
+    blockHitResult = 0
+    loot b = 0
+    grind (b < blockCount)
+        loot bx = blockAnchorX[b]
+        loot by = blockAnchorY[b]
+        when (testQueryX >= bx and testQueryX < bx + BLOCK_DIM and testQueryY >= by and testQueryY < by + BLOCK_DIM)
+            blockHitResult = 1
+        finish
+        b = b + 1
+    finish
+    reward 0
+finish
+
+# --- Seeds random 4x4 obstacle blocks ---------------------------------
+skill spawnObstacleBlocks()
+    loot b = 0
+    grind (b < blockCount)
+        loot validBlock = 0
+        loot tries = 0
+        grind (validBlock == 0 and tries < 150)
+            loot candidateX = random(2, COLS - BLOCK_DIM - 2)
+            loot candidateY = random(2, ROWS - BLOCK_DIM - 2)
+            validBlock = 1
+
+            # Safe initial zone for the snake start (Row y=11, cols 8..16)
+            when (candidateY <= 12 and candidateY + BLOCK_DIM >= 10 and candidateX <= 17 and candidateX + BLOCK_DIM >= 7)
+                validBlock = 0
+            finish
+
+            # Ensure 4x4 blocks don't overlap previous blocks
+            loot prev = 0
+            grind (prev < b)
+                loot px = blockAnchorX[prev]
+                loot py = blockAnchorY[prev]
+                when (candidateX < px + BLOCK_DIM + 1 and candidateX + BLOCK_DIM + 1 > px and candidateY < py + BLOCK_DIM + 1 and candidateY + BLOCK_DIM + 1 > py)
+                    validBlock = 0
+                finish
+                prev = prev + 1
+            finish
+
+            when (validBlock == 1)
+                blockAnchorX[b] = candidateX
+                blockAnchorY[b] = candidateY
+            finish
+            tries = tries + 1
+        finish
+        b = b + 1
+    finish
+    reward 0
+finish
+
+# --- Spawns food avoiding snake & 4x4 blocks ---------------------------
+skill spawnFood()
+    loot validPos = 0
+    loot tries = 0
+    grind (validPos == 0 and tries < 100)
+        foodX = random(0, COLS - 1)
+        foodY = random(0, ROWS - 1)
+        validPos = 1
+
+        # Check snake body
+        loot i = 0
+        grind (i < snakeLength)
+            when (snakeX[i] == foodX and snakeY[i] == foodY)
+                validPos = 0
+            finish
+            i = i + 1
+        finish
+
+        # Check against all 4x4 hazard blocks via global test
+        testQueryX = foodX
+        testQueryY = foodY
+        call checkBlockHit()
+        when (blockHitResult == 1)
+            validPos = 0
+        finish
+
+        tries = tries + 1
+    finish
+    reward 0
+finish
+
+# --- Resets game state -------------------------------------------------
+skill resetGame()
+    score = 0
+    snakeLength = 3
+    dirX = 1
+    dirY = 0
+    nextDirX = 1
+    nextDirY = 0
+
+    snakeX[0] = 12
+    snakeY[0] = 11
+    snakeX[1] = 11
+    snakeY[1] = 11
+    snakeX[2] = 10
+    snakeY[2] = 11
+
+    call spawnObstacleBlocks()
+    call spawnFood()
+    call updateScoreString()
+    reward 0
+finish
+
+# --- Applies configured speed interval ---------------------------------
+skill applySpeed()
+    when (speedLevel == 1)
+        moveInterval = 9
+        hudSpeedStr = "SPD: CASUAL"
+    finish
+    when (speedLevel == 2)
+        moveInterval = 6
+        hudSpeedStr = "SPD: NORMAL"
+    finish
+    when (speedLevel == 3)
+        moveInterval = 4
+        hudSpeedStr = "SPD: OVERDRIVE"
+    finish
+
+    when (blockCount == 0)
+        hudHazardStr = "HAZARDS: 0"
+    finish
+    when (blockCount == 2)
+        hudHazardStr = "HAZARDS: 2 (4x4)"
+    finish
+    when (blockCount == 4)
+        hudHazardStr = "HAZARDS: 4 (4x4)"
+    finish
+    reward 0
+finish
+
+# --- Advance Snake -----------------------------------------------------
+skill moveSnake()
+    loot i = snakeLength - 1
+    grind (i > 0)
+        snakeX[i] = snakeX[i - 1]
+        snakeY[i] = snakeY[i - 1]
+        i = i - 1
+    finish
+
+    dirX = nextDirX
+    dirY = nextDirY
+    snakeX[0] = snakeX[0] + dirX
+    snakeY[0] = snakeY[0] + dirY
+    reward 0
+finish
+
+# --- Check Collisions --------------------------------------------------
+skill checkCollisions()
+    loot hitDeath = 0
+
+    # 1. Wall Collisions
+    when (snakeX[0] < 0 or snakeX[0] >= COLS or snakeY[0] < 0 or snakeY[0] >= ROWS)
+        hitDeath = 1
+    finish
+
+    # 2. Body Self-Collision
+    loot i = 1
+    grind (i < snakeLength)
+        when (snakeX[0] == snakeX[i] and snakeY[0] == snakeY[i])
+            hitDeath = 1
+        finish
+        i = i + 1
+    finish
+
+    # 3. 4x4 Block Obstacle Collision via global query
+    testQueryX = snakeX[0]
+    testQueryY = snakeY[0]
+    call checkBlockHit()
+    when (blockHitResult == 1)
+        hitDeath = 1
+    finish
+
+    when (hitDeath == 1)
+        finalScoreStr = "FINAL " + hudScoreStr
+        state = 2
+        reward 0
+    finish
+
+    # 4. Food Collection
+    when (snakeX[0] == foodX and snakeY[0] == foodY)
+        score = score + 10
+        call spawnFood()
+
+        when (snakeLength < CAPACITY - 1)
+            snakeX[snakeLength] = snakeX[snakeLength - 1]
+            snakeY[snakeLength] = snakeY[snakeLength - 1]
+            snakeLength = snakeLength + 1
+        finish
+
+        call updateScoreString()
+    finish
+
+    reward 0
+finish
+
+# --- Handle Keyboard Input ---------------------------------------------
+skill handleInput()
+    when (is_key_down(256) == 1)
+        quitFlag = 1
+        reward 0
+    finish
+
+    when (state == 0)
+        # Speed: 1, 2, 3
+        when (is_key_down(49) == 1)
+            speedLevel = 1
+        finish
+        when (is_key_down(50) == 1)
+            speedLevel = 2
+        finish
+        when (is_key_down(51) == 1)
+            speedLevel = 3
+        finish
+
+        # Block Hazards: Q (81), W (87), E (69)
+        when (is_key_down(81) == 1)
+            blockCount = 0
+        finish
+        when (is_key_down(87) == 1)
+            blockCount = 2
+        finish
+        when (is_key_down(69) == 1)
+            blockCount = 4
+        finish
+
+        when (is_key_down(257) == 1)
+            call applySpeed()
+            call resetGame()
+            state = 1
+            frameCounter = 0
+        finish
+    finish
+
+    when (state == 1)
+        loot newDirX = dirX
+        loot newDirY = dirY
+        loot changed = 0
+
+        when (is_key_down(265) == 1 or is_key_down(87) == 1)
+            newDirX = 0
+            newDirY = -1
+            changed = 1
+        finish
+        when (is_key_down(264) == 1 or is_key_down(83) == 1)
+            newDirX = 0
+            newDirY = 1
+            changed = 1
+        finish
+        when (is_key_down(263) == 1 or is_key_down(65) == 1)
+            newDirX = -1
+            newDirY = 0
+            changed = 1
+        finish
+        when (is_key_down(262) == 1 or is_key_down(68) == 1)
+            newDirX = 1
+            newDirY = 0
+            changed = 1
+        finish
+
+        when (changed == 1)
+            loot isReverse = 0
+            when (newDirX == -dirX and newDirY == -dirY)
+                isReverse = 1
+            finish
+            when (isReverse == 0)
+                nextDirX = newDirX
+                nextDirY = newDirY
+            finish
+        finish
+    finish
+
+    when (state == 2)
+        when (is_key_down(32) == 1)
+            call resetGame()
+            state = 1
+            frameCounter = 0
+        finish
+    finish
+
+    reward 0
+finish
+
+# --- Screen: Menu ------------------------------------------------------
+skill drawMenu()
+    call draw_rect_color(0, 0, 800, 680, 15, 17, 26)
+
+    call draw_rect_color(180, 50, 440, 4, 245, 166, 35)
+    call draw_text(245, 75, 52, titleStr)
+    call draw_text(165, 140, 18, subtitleStr)
+
+    # Speed Selector Row
+    call draw_text(160, 185, 16, speedHeaderStr)
+
+    when (speedLevel == 1)
+        call draw_rect_color(160, 210, 140, 45, 34, 197, 94)
+    otherwise
+        call draw_rect_color(160, 210, 140, 45, 26, 31, 46)
+    finish
+    call draw_text(180, 223, 16, "[1] CASUAL")
+
+    when (speedLevel == 2)
+        call draw_rect_color(330, 210, 140, 45, 245, 166, 35)
+    otherwise
+        call draw_rect_color(330, 210, 140, 45, 26, 31, 46)
+    finish
+    call draw_text(350, 223, 16, "[2] NORMAL")
+
+    when (speedLevel == 3)
+        call draw_rect_color(500, 210, 140, 45, 244, 63, 94)
+    otherwise
+        call draw_rect_color(500, 210, 140, 45, 26, 31, 46)
+    finish
+    call draw_text(510, 223, 16, "[3] OVERDRIVE")
+
+    # Hazard Selector Row
+    call draw_text(160, 285, 16, hazardHeaderStr)
+
+    when (blockCount == 0)
+        call draw_rect_color(160, 310, 140, 45, 59, 130, 246)
+    otherwise
+        call draw_rect_color(160, 310, 140, 45, 26, 31, 46)
+    finish
+    call draw_text(180, 323, 16, "[Q] 0 BLOCKS")
+
+    when (blockCount == 2)
+        call draw_rect_color(330, 310, 140, 45, 168, 85, 247)
+    otherwise
+        call draw_rect_color(330, 310, 140, 45, 26, 31, 46)
+    finish
+    call draw_text(350, 323, 16, "[W] 2 BLOCKS")
+
+    when (blockCount == 4)
+        call draw_rect_color(500, 310, 140, 45, 236, 72, 153)
+    otherwise
+        call draw_rect_color(500, 310, 140, 45, 26, 31, 46)
+    finish
+    call draw_text(520, 323, 16, "[E] 4 BLOCKS")
+
+    # Action buttons
+    call draw_rect_color(260, 410, 280, 55, 37, 99, 235)
+    call draw_text(285, 428, 20, startLabelStr)
+
+    call draw_rect_color(260, 485, 280, 50, 30, 36, 54)
+    call draw_text(345, 502, 18, exitLabelStr)
+
+    reward 0
+finish
+
+# --- Screen: In-Game ---------------------------------------------------
+skill drawGame()
+    call draw_rect_color(0, 0, 800, 680, 13, 15, 24)
+
+    # Top HUD Bar
+    call draw_rect_color(0, 0, 800, 65, 19, 22, 34)
+    call draw_rect_color(0, 64, 800, 2, 40, 47, 71)
+
+    call draw_text(BOARD_OFFSET_X + 5, 20, 22, hudScoreStr)
+    call draw_text(250, 22, 18, hudSpeedStr)
+    call draw_text(440, 22, 18, hudHazardStr)
+    call draw_text(690, 24, 16, escPromptStr)
+
+    # Board play area
+    call draw_rect_color(BOARD_OFFSET_X, BOARD_OFFSET_Y, COLS * CELL, ROWS * CELL, 18, 21, 32)
+
+    # Background grid
+    loot gx = 1
+    grind (gx < COLS)
+        call draw_rect_color(BOARD_OFFSET_X + gx * CELL, BOARD_OFFSET_Y, 1, ROWS * CELL, 23, 27, 40)
+        gx = gx + 1
+    finish
+    loot gy = 1
+    grind (gy < ROWS)
+        call draw_rect_color(BOARD_OFFSET_X, BOARD_OFFSET_Y + gy * CELL, COLS * CELL, 1, 23, 27, 40)
+        gy = gy + 1
+    finish
+
+    # Board perimeter
+    call draw_rect_color(BOARD_OFFSET_X - 2, BOARD_OFFSET_Y - 2, COLS * CELL + 4, 2, 59, 130, 246)
+    call draw_rect_color(BOARD_OFFSET_X - 2, BOARD_OFFSET_Y + ROWS * CELL, COLS * CELL + 4, 2, 59, 130, 246)
+    call draw_rect_color(BOARD_OFFSET_X - 2, BOARD_OFFSET_Y - 2, 2, ROWS * CELL + 4, 59, 130, 246)
+    call draw_rect_color(BOARD_OFFSET_X + COLS * CELL, BOARD_OFFSET_Y - 2, 2, ROWS * CELL + 4, 59, 130, 246)
+
+    # Draw 4x4 Solid Hazard Clusters (100x100 px solid slabs)
+    loot b = 0
+    grind (b < blockCount)
+        loot bx = BOARD_OFFSET_X + blockAnchorX[b] * CELL
+        loot by = BOARD_OFFSET_Y + blockAnchorY[b] * CELL
+        loot sizePx = BLOCK_DIM * CELL
+
+        call draw_rect_color(bx + 1, by + 1, sizePx - 2, sizePx - 2, 126, 34, 206)
+        call draw_rect_color(bx + 6, by + 6, sizePx - 12, sizePx - 12, 88, 28, 135)
+        call draw_rect_color(bx + 20, by + 20, sizePx - 40, sizePx - 40, 192, 132, 252)
+
+        b = b + 1
+    finish
+
+    # Draw Food
+    call draw_rect_color(BOARD_OFFSET_X + foodX * CELL + 2, BOARD_OFFSET_Y + foodY * CELL + 2, CELL - 4, CELL - 4, 239, 68, 68)
+    call draw_rect_color(BOARD_OFFSET_X + foodX * CELL + 6, BOARD_OFFSET_Y + foodY * CELL + 6, CELL - 12, CELL - 12, 252, 165, 165)
+
+    # Draw Snake
+    loot i = 0
+    grind (i < snakeLength)
+        when (i == 0)
+            call draw_rect_color(BOARD_OFFSET_X + snakeX[i] * CELL + 1, BOARD_OFFSET_Y + snakeY[i] * CELL + 1, CELL - 2, CELL - 2, 52, 211, 153)
+            call draw_rect_color(BOARD_OFFSET_X + snakeX[i] * CELL + 5, BOARD_OFFSET_Y + snakeY[i] * CELL + 5, CELL - 10, CELL - 10, 167, 243, 208)
+        otherwise
+            call draw_rect_color(BOARD_OFFSET_X + snakeX[i] * CELL + 2, BOARD_OFFSET_Y + snakeY[i] * CELL + 2, CELL - 4, CELL - 4, 16, 185, 129)
+        finish
+        i = i + 1
+    finish
+
+    reward 0
+finish
+
+# --- Screen: Game Over -------------------------------------------------
+skill drawGameOver()
+    call draw_rect_color(0, 0, 800, 680, 10, 12, 18)
+
+    call draw_rect_color(160, 130, 480, 400, 20, 24, 38)
+    call draw_rect_color(160, 130, 480, 4, 244, 63, 94)
+
+    call draw_text(220, 180, 46, gameOverStr)
+    call draw_text(290, 270, 24, finalScoreStr)
+
+    call draw_rect_color(220, 360, 360, 55, 34, 197, 94)
+    call draw_text(315, 377, 20, retryLabelStr)
+
+    call draw_rect_color(220, 435, 360, 50, 33, 40, 60)
+    call draw_text(340, 450, 18, exitLabelStr)
+
+    reward 0
+finish
+
+# =========================================================================
+# MAIN
+# =========================================================================
+call init_window(800, 680, "Nova Snake Pro")
+call set_fps(60)
+call applySpeed()
+
+grind (quitFlag == 0)
+    call handleInput()
+
+    when (quitFlag == 1)
+        continue
+    finish
+
+    call clear_screen()
+
+    when (state == 0)
+        call drawMenu()
+    finish
+
+    when (state == 1)
+        frameCounter = frameCounter + 1
+        when (frameCounter % moveInterval == 0)
+            call moveSnake()
+            call checkCollisions()
+        finish
+        call drawGame()
+    finish
+
+    when (state == 2)
+        call drawGameOver()
+    finish
+
+    call render_frame()
+finish
+
+call close_window()

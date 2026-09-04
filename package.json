@@ -1,0 +1,12 @@
+{
+  "name": "nova-playground-backend",
+  "version": "1.0.0",
+  "description": "Backend for the Nova language web playground: runs submitted .nv source against the compiled Nova compiler in a sandboxed subprocess.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node backend/server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

@@ -1,0 +1,22 @@
+[
+  {
+    "id": "basics",
+    "title": "Numbers & arithmetic",
+    "code": "loot x = 10\nloot y = 3\n\nannounce(x + y)\nannounce(x - y)\nannounce(x * y)\nannounce(x / y)\nannounce(x % y)\n"
+  },
+  {
+    "id": "control-flow",
+    "title": "Loops & break/continue",
+    "code": "loot n = 0\ngrind (n < 20)\n    n = n + 1\n    when (n % 3 != 0)\n        continue\n    finish\n    when (n > 15)\n        break\n    finish\n    announce(n)\nfinish\n"
+  },
+  {
+    "id": "arrays",
+    "title": "Arrays & bounds checking",
+    "code": "loot nums = array_new(5)\nnums[0] = 10\nnums[1] = 20\nnums[2] = 30\n\nannounce(length(nums))\nannounce(nums)\nannounce(nums[1])\n\nannounce(nums[10])\n"
+  },
+  {
+    "id": "strings",
+    "title": "Strings",
+    "code": "loot first = \"Hello\"\nloot second = \"World\"\nloot greeting = first + \", \" + second + \"!\"\n\nannounce(greeting)\nannounce(length(greeting))\nannounce(first == \"Hello\")\nannounce(first == second)\n"
+  }
+]
