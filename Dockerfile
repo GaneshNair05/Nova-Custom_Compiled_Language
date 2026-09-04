@@ -2,32 +2,43 @@ FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install LLVM, build tools, Raylib, and Node.js
-RUN apt-get update && apt-get install -y \
+# 1. Install base utilities, LLVM, build tools, and Raylib dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    ca-certificates \
     build-essential \
     cmake \
+    git \
     llvm-dev \
-    libraylib-dev \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    libgl1-mesa-dev \
+    libglu1-mesa-dev \
+    libx11-dev \
+    libxcursor-dev \
+    libxinerama-dev \
+    libxrandr-dev \
+    libxi-dev \
+    libasound2-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. Install Node.js 20.x
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Install Node dependencies
+# 3. Install backend dependencies
 COPY package*.json ./
 RUN npm install
 
-# Copy source files
+# 4. Copy source files
 COPY . .
 
-# Build your C++ compiler using your root CMakeLists.txt
+# 5. Build the Nova compiler
 RUN cmake -B build -DCMAKE_BUILD_TYPE=Release \
     && cmake --build build --config Release
 
-# Ensure the compiled Linux binary is executable
-# (assuming CMake produces 'mycompiler' inside /app/build/)
+# 6. Ensure binary execution permissions
 RUN chmod +x /app/build/mycompiler
 
 ENV PORT=4000
