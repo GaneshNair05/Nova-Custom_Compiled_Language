@@ -18,7 +18,11 @@
 #include <llvm/ExecutionEngine/GenericValue.h>
 #include <llvm/ExecutionEngine/MCJIT.h>
 #include <llvm/Support/TargetSelect.h>
-#include <llvm/TargetParser/Host.h>
+#if __has_include(<llvm/TargetParser/Host.h>)
+    #include <llvm/TargetParser/Host.h>
+#else
+    #include <llvm/Support/Host.h>
+#endif
 #include <llvm/Support/DynamicLibrary.h>
 
 #include "../parser/ast.h"
