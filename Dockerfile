@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
     git \
+    zlib1g-dev\
     llvm-dev \
     libgl1-mesa-dev \
     libglu1-mesa-dev \
