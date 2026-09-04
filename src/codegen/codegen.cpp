@@ -50,6 +50,13 @@ JIT_API double nova_draw_text(double x, double y, double size, double* strBuf) {
     return 0.0;
 }
 
+JIT_API double nova_draw_number(double x, double y, double size, double value) {
+    char buf[64];
+    snprintf(buf, sizeof(buf), "%.0f", value);
+    DrawText(buf, (int)x, (int)y, (int)size, WHITE);
+    return 0.0;
+}
+
 JIT_API double nova_clear_screen() {
     BeginDrawing();
     ClearBackground(BLACK);
@@ -174,12 +181,18 @@ extern "C" double nova_string_equals(double* a, double* b) {
     }
     return 1.0;
 }
-static llvm::FunctionCallee getMallocFn(llvm::Module* module, llvm::IRBuilder<>& builder) {
-    llvm::FunctionType* ft = llvm::FunctionType::get(builder.getPtrTy(), {builder.getInt64Ty()}, false);
+// `sizeTy` must match the real malloc/calloc size_t width on whatever
+// target actually links this IR: i64 on every desktop target (the
+// original assumption here), but i32 on wasm32 — declaring these with the
+// wrong width doesn't break compiling the .nv script, it breaks linking
+// the resulting bitcode against the real libc malloc/calloc later ("function
+// signature mismatch" from wasm-ld). See CodeGen::sizeTy().
+static llvm::FunctionCallee getMallocFn(llvm::Module* module, llvm::IRBuilder<>& builder, llvm::IntegerType* sizeTy) {
+    llvm::FunctionType* ft = llvm::FunctionType::get(builder.getPtrTy(), {sizeTy}, false);
     return module->getOrInsertFunction("malloc", ft);
 }
-static llvm::FunctionCallee getCallocFn(llvm::Module* module, llvm::IRBuilder<>& builder) {
-    llvm::FunctionType* ft = llvm::FunctionType::get(builder.getPtrTy(), {builder.getInt64Ty(), builder.getInt64Ty()}, false);
+static llvm::FunctionCallee getCallocFn(llvm::Module* module, llvm::IRBuilder<>& builder, llvm::IntegerType* sizeTy) {
+    llvm::FunctionType* ft = llvm::FunctionType::get(builder.getPtrTy(), {sizeTy, sizeTy}, false);
     return module->getOrInsertFunction("calloc", ft);
 }
 // Pairs with getMallocFn/getCallocFn above: arrays are never freed
@@ -223,7 +236,8 @@ static llvm::Type* getSlotType(llvm::Value* slot) {
     return nullptr;
 }
 
-CodeGen::CodeGen(const std::string& moduleName) {
+CodeGen::CodeGen(const std::string& moduleName, bool wasmTarget)
+    : wasmTarget(wasmTarget) {
     context = std::make_unique<llvm::LLVMContext>();
     module = std::make_unique<llvm::Module>(moduleName, *context);
     builder = std::make_unique<llvm::IRBuilder<>>(*context);
@@ -237,9 +251,19 @@ CodeGen::CodeGen(const std::string& moduleName) {
     llvm::Function::Create(printType, llvm::Function::ExternalLinkage, "print", module.get());
 }
 
+llvm::IntegerType* CodeGen::sizeTy() const {
+    return wasmTarget ? builder->getInt32Ty() : builder->getInt64Ty();
+}
+
 void CodeGen::generate(const std::vector<StmtPtr>& statements) {
+    // Named "nova_main", not "main": on the native JIT path this doesn't
+    // matter, but on the wasm/emcc path a function literally named "main"
+    // collides with the C runtime's own notion of the program entry point
+    // (Emscripten's startup code wants to own that symbol) — that collision
+    // is a likely source of the "duplicate export name" link error. Give
+    // the wasm build's own C `main()` a body that just calls nova_main().
     llvm::FunctionType* funcType = llvm::FunctionType::get(llvm::Type::getDoubleTy(*context), false);
-    llvm::Function* mainFunc = llvm::Function::Create(funcType, llvm::Function::ExternalLinkage, "main", module.get());
+    llvm::Function* mainFunc = llvm::Function::Create(funcType, llvm::Function::ExternalLinkage, "nova_main", module.get());
 
     llvm::BasicBlock* entryBlock = llvm::BasicBlock::Create(*context, "entry", mainFunc);
     builder->SetInsertPoint(entryBlock);
@@ -294,6 +318,9 @@ void CodeGen::execute() {
     if (auto* fn = modulePtr->getFunction("nova_draw_text")) {
         engine->addGlobalMapping(fn, (void*)&nova_draw_text);
     }
+    if (auto* fn = modulePtr->getFunction("nova_draw_number")) {
+        engine->addGlobalMapping(fn, (void*)&nova_draw_number);
+    }
     if (auto* fn = modulePtr->getFunction("nova_clear_screen")) {
         engine->addGlobalMapping(fn, (void*)&nova_clear_screen);
     }
@@ -329,7 +356,7 @@ void CodeGen::execute() {
     }
     
     engine->finalizeObject();
-    uint64_t mainAddress = engine->getFunctionAddress("main");
+    uint64_t mainAddress = engine->getFunctionAddress("nova_main");
     if(mainAddress == 0){
         std::cerr << "Couldn't find the compiled main function address. \n";
         return;
@@ -633,9 +660,9 @@ llvm::Value* CodeGen::visitLiteralExpr(LiteralExpression* literal) {
         // whose elements are arbitrary expressions that must be evaluated).
         const std::string& text = literal->value.value;
         uint64_t n = text.size();
-        llvm::Value* byteSize = builder->getInt64((n + NOVA_HEADER_SLOTS) * NOVA_ELEM_SIZE);
+        llvm::Value* byteSize = llvm::ConstantInt::get(sizeTy(), (n + NOVA_HEADER_SLOTS) * NOVA_ELEM_SIZE);
 
-        llvm::FunctionCallee mallocFn = getMallocFn(module.get(), *builder);
+        llvm::FunctionCallee mallocFn = getMallocFn(module.get(), *builder, sizeTy());
         llvm::Value* strPtr = builder->CreateCall(mallocFn, {byteSize}, "str_ptr");
 
         builder->CreateStore(llvm::ConstantFP::get(*context, llvm::APFloat(NOVA_TAG_STRING)), strPtr);
@@ -917,11 +944,11 @@ llvm::Value* CodeGen::visitCallExpr(CallExpression* call) {
         // hold the elements.
         llvm::Value* sizeVal = generateExpression(call->args[0].get());
         if (!sizeVal) return nullptr;
-        llvm::Value* sizeInt = builder->CreateFPToUI(sizeVal, builder->getInt64Ty(), "arr_len");
-        llvm::Value* totalSlots = builder->CreateAdd(sizeInt, builder->getInt64(NOVA_HEADER_SLOTS), "arr_total_slots");
+        llvm::Value* sizeInt = builder->CreateFPToUI(sizeVal, sizeTy(), "arr_len");
+        llvm::Value* totalSlots = builder->CreateAdd(sizeInt, llvm::ConstantInt::get(sizeTy(), NOVA_HEADER_SLOTS), "arr_total_slots");
 
-        llvm::FunctionCallee callocFn = getCallocFn(module.get(), *builder);
-        llvm::Value* arrPtr = builder->CreateCall(callocFn, {totalSlots, builder->getInt64(NOVA_ELEM_SIZE)}, "arr_ptr");
+        llvm::FunctionCallee callocFn = getCallocFn(module.get(), *builder, sizeTy());
+        llvm::Value* arrPtr = builder->CreateCall(callocFn, {totalSlots, llvm::ConstantInt::get(sizeTy(), NOVA_ELEM_SIZE)}, "arr_ptr");
         // calloc zeroes everything, which already gives slot 0 the
         // NOVA_TAG_ARRAY bit pattern (0.0 is all-zero bits under IEEE754)
         // and zeroes every element slot correctly either way — only the
@@ -1092,6 +1119,24 @@ llvm::Value* CodeGen::visitCallExpr(CallExpression* call) {
         llvm::FunctionCallee nativeDrawText = module->getOrInsertFunction("nova_draw_text", ft);
         return builder->CreateCall(nativeDrawText, {x, y, size, strPtr});
     }
+    // draw_number(x, y, size, value): like draw_text but for a raw number —
+    // no Nova string involved at all, so there's no string-concatenation
+    // ("+") needed just to put a score on screen.
+    if (varNode->name == "draw_number" && call->args.size() == 4) {
+        llvm::Value* x = generateExpression(call->args[0].get());
+        llvm::Value* y = generateExpression(call->args[1].get());
+        llvm::Value* size = generateExpression(call->args[2].get());
+        llvm::Value* value = generateExpression(call->args[3].get());
+        if (!x || !y || !size || !value) return nullptr;
+
+        llvm::FunctionType* ft = llvm::FunctionType::get(
+            builder->getDoubleTy(),
+            {builder->getDoubleTy(), builder->getDoubleTy(), builder->getDoubleTy(), builder->getDoubleTy()},
+            false
+        );
+        llvm::FunctionCallee nativeDrawNumber = module->getOrInsertFunction("nova_draw_number", ft);
+        return builder->CreateCall(nativeDrawNumber, {x, y, size, value});
+    }
 
     // --- CUSTOM SKILL EXECUTION ---
     llvm::Function* calleeF = module->getFunction(varNode->name);
@@ -1119,9 +1164,9 @@ llvm::Value* CodeGen::visitCallExpr(CallExpression* call) {
 // codegen below.
 llvm::Value* CodeGen::visitArrayLiteralExpr(ArrayLiteralExpression* expr) {
     uint64_t n = expr->elements.size();
-    llvm::Value* byteSize = builder->getInt64((n + NOVA_HEADER_SLOTS) * NOVA_ELEM_SIZE);
+    llvm::Value* byteSize = llvm::ConstantInt::get(sizeTy(), (n + NOVA_HEADER_SLOTS) * NOVA_ELEM_SIZE);
 
-    llvm::FunctionCallee mallocFn = getMallocFn(module.get(), *builder);
+    llvm::FunctionCallee mallocFn = getMallocFn(module.get(), *builder, sizeTy());
     llvm::Value* arrPtr = builder->CreateCall(mallocFn, {byteSize}, "arr_ptr");
 
     // Slot 0: tag (this is an array, not a string)
