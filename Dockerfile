@@ -28,6 +28,22 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
+# 2b. Build and install raylib from source — it isn't in Ubuntu's apt repos
+# (only an unrelated "python3-xraylib" X-ray physics package matches that
+# name), so codegen.cpp's `#include <raylib.h>` has nothing to resolve
+# against without this. Installs raylib.h/rlgl.h/raymath.h to
+# /usr/local/include and libraylib.a + a raylib-config.cmake to
+# /usr/local/lib, so both a manual `-lraylib` and CMake's
+# `find_package(raylib)` will find it. Static build (raylib's CMake
+# default) keeps the final image from needing libraylib.so at runtime.
+# The X11/GL/ALSA -dev packages installed in step 1 are raylib's actual
+# build dependencies on Linux — that's why they were already there.
+RUN git clone --depth 1 --branch 5.5 https://github.com/raysan5/raylib.git /tmp/raylib \
+    && cmake -S /tmp/raylib -B /tmp/raylib/build -DBUILD_EXAMPLES=OFF -DCMAKE_BUILD_TYPE=Release \
+    && cmake --build /tmp/raylib/build -j$(nproc) \
+    && cmake --install /tmp/raylib/build \
+    && rm -rf /tmp/raylib
+
 WORKDIR /app
 
 # 3. Install backend dependencies
