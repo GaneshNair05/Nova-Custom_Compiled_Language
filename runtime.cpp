@@ -81,7 +81,7 @@ double nova_draw_rect_color(double x, double y, double w, double h, double r, do
 double nova_draw_text(double x, double y, double fontSize, double* strBuf) {
     char buf[256];
     decodeNovaString(strBuf, buf, sizeof(buf));
-    DrawText(buf, (int)x, (int)y, (int)fontSize, BLACK);
+    DrawText(buf, (int)x, (int)y, (int)fontSize, WHITE);
     return 0.0;
 }
 
