@@ -537,4 +537,3 @@ bounds-check error path), not run through a second interpreter. Anything
 that isn't an exact match to a bundled example gets an explanatory message
 rather than a guess. If you add or edit an example in `examples.json`, add
 a matching entry to `mockExamples.js` too, or it'll fall out of demo mode.
-=======
