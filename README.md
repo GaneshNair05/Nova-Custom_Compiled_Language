@@ -376,6 +376,7 @@ call add(10, 20)
 
 
 ## 🗺️ Compiler Pipeline
+<img width="1243" height="1265" alt="ChatGPT Image Sep 5, 2026, 02_46_48 PM" src="https://github.com/user-attachments/assets/b361ac7a-12d9-4f8c-92d0-c982df84869c" />
 
 ---
 
