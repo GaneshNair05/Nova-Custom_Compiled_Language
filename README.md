@@ -1,6 +1,6 @@
 # Nova
 
-<<<<<<< HEAD
+
 ### A custom compiled programming language built from scratch in C++
 
 **Nova** is a custom programming language and compiler designed around a game-inspired syntax. The project implements the core stages of a compiler — **lexical analysis, parsing, AST construction, LLVM IR generation, and execution** — without relying on parser generators.
@@ -538,7 +538,3 @@ that isn't an exact match to a bundled example gets an explanatory message
 rather than a guess. If you add or edit an example in `examples.json`, add
 a matching entry to `mockExamples.js` too, or it'll fall out of demo mode.
 =======
-https://nova-custom-compiled-language.onrender.com/
-
-https://ganeshnair05.github.io/Nova-Custom_Compiled_Language/
->>>>>>> bc69c218e464fcbe2b678f20a32cf2f9157371ed
